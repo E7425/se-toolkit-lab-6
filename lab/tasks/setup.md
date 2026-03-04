@@ -194,7 +194,7 @@
 
 <h4>The terminal shell is not <code>bash</code> or <code>zsh</code></h4>
 
-Go back to [step 1.4.3](#143-upd-windows-only-set-the-default-shell-for-the-vs-code-terminal) and set the default shell.
+Go back to [step 1.4.3](#143-upd-windows-only-switch-to-the-linux-shell-for-the-vs-code-terminal) and set the default shell.
 
 <h4>Recommended extensions did not install</h4>
 
