@@ -8,7 +8,7 @@ from pathlib import Path
 
 def test_agent_outputs_required_fields() -> None:
     """Test that agent.py outputs valid JSON with required answer and tool_calls fields."""
-    project_root = Path(__file__).parent.parent.parent.parent
+    project_root = Path(__file__).parent.parent
     agent_path = project_root / "agent.py"
 
     result = subprocess.run(
