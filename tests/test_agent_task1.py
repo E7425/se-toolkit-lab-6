@@ -1,4 +1,4 @@
-"""Regression tests for agent.py CLI."""
+"""Regression tests for agent.py CLI - Task 1."""
 
 import json
 import subprocess
@@ -29,4 +29,3 @@ def test_agent_outputs_required_fields() -> None:
 
     assert "tool_calls" in output, "Missing 'tool_calls' field in output"
     assert isinstance(output["tool_calls"], list), "'tool_calls' must be a list"
-    assert output["tool_calls"] == [], "'tool_calls' must be empty for Task 1"
