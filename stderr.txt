@@ -1,0 +1,10 @@
+Using model: qwen3-coder-plus
+API Base: http://localhost:42002
+Starting agentic loop (max 10 iterations)...
+Iteration 1/10
+  Executing tool: list_files
+Iteration 2/10
+  Executing tool: read_file
+Iteration 3/10
+Final answer received. Source: wiki/github.md#protect-a-branch
+Error: 'charmap' codec can't encode character '\U0001f44d' in position 10815: character maps to <undefined>
