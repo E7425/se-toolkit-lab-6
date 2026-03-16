@@ -2,7 +2,7 @@
 
 ## Overview
 
-This agent is a CLI tool that connects to an LLM and answers questions using the project wiki documentation. It implements an agentic loop with tool calling capabilities.
+This agent is a CLI tool that connects to an LLM and answers questions using tools. It implements an agentic loop with tool calling capabilities, including file operations and backend API queries.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ This agent is a CLI tool that connects to an LLM and answers questions using the
 2. **Agentic Loop**: 
    - Send question + tool definitions to LLM
    - If LLM returns tool calls → execute tools, feed results back
-   - Repeat until LLM returns final answer or max 10 iterations
+   - Repeat until LLM returns final answer or max 20 iterations
 3. **Output Formatting**: Return JSON with `answer`, `source`, and `tool_calls`
 
 ## LLM Provider
@@ -58,6 +58,8 @@ Required environment variables:
 | `LLM_API_KEY` | API key for authentication | `your-api-key` |
 | `LLM_API_BASE` | Base URL of LLM API | `http://<vm-ip>:<port>/v1` |
 | `LLM_MODEL` | Model name | `qwen3-coder-plus` |
+| `LMS_API_KEY` | Backend API key for query_api | `your-lms-key` |
+| `AGENT_API_BASE_URL` | Backend API URL | `http://localhost:42002` |
 
 ## Usage
 
@@ -93,18 +95,8 @@ The agent outputs a single JSON line to stdout:
 | Field | Type | Description |
 |-------|------|-------------|
 | `answer` | string | The LLM's response to the question |
-| `source` | string | Wiki file reference (e.g., `wiki/file.md#section`) |
+| `source` | string | Wiki file reference or API endpoint |
 | `tool_calls` | array | All tool calls made during the agentic loop |
-
-### Tool Call Structure
-
-Each entry in `tool_calls` contains:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `tool` | string | Name of the tool (`read_file` or `list_files`) |
-| `args` | object | Arguments passed to the tool |
-| `result` | string | The tool's output or error message |
 
 ## Tools
 
@@ -140,6 +132,26 @@ List files and directories at a given path.
 - Cannot list directories outside the project directory
 - Path traversal (`../`) is blocked
 
+### query_api
+
+Call the deployed backend LMS API for data queries.
+
+**Parameters:**
+- `method` (string, required) — HTTP method (GET, POST, PUT, DELETE)
+- `path` (string, required) — API endpoint path
+- `body` (string, optional) — JSON request body for POST/PUT
+- `include_auth` (boolean, optional, default: true) — Whether to include authentication
+
+**Example:**
+```json
+{"tool": "query_api", "args": {"method": "GET", "path": "/items/"}}
+```
+
+**Authentication:**
+- Uses `LMS_API_KEY` from `.env.docker.secret`
+- Sent as `Authorization: Bearer <LMS_API_KEY>` header
+- Set `include_auth: false` to test unauthenticated access
+
 ## Agentic Loop
 
 The agent implements an iterative reasoning loop:
@@ -151,17 +163,17 @@ The agent implements an iterative reasoning loop:
      a. Execute each tool
      b. Record tool call (tool, args, result)
      c. Append tool results as "tool" role messages
-     d. If iterations < 10, go to step 1
+     d. If iterations < 20, go to step 1
    - If text message (no tool calls):
      a. Extract answer
      b. Extract source reference
      c. Output JSON and exit
-3. If max iterations (10) reached, output best available answer
+3. If max iterations (20) reached, output best available answer
 ```
 
 ### Maximum Iterations
 
-The loop runs at most 10 times to prevent infinite loops.
+The loop runs at most 20 times to prevent infinite loops.
 
 ## System Prompt
 
@@ -169,12 +181,13 @@ The system prompt instructs the LLM to:
 
 1. Use `list_files` to discover relevant wiki files
 2. Use `read_file` to read specific documentation files
-3. Answer questions based on file contents
-4. Include source references in the format `wiki/filename.md#section-anchor`
+3. Use `query_api` for live data queries
+4. Answer questions based on file contents
+5. Include source references in the format `wiki/filename.md#section-anchor`
 
 ## Path Security
 
-Both tools implement path security to prevent directory traversal:
+Both file tools implement path security to prevent directory traversal:
 
 ```python
 def safe_resolve_path(path: str, project_root: Path) -> Path | None:
@@ -211,6 +224,45 @@ uv run pytest tests/ -v
 Tests verify:
 - `test_agent_task1.py`: Basic JSON output with required fields
 - `test_agent_task2.py`: Tool usage for documentation questions
+- `test_agent_task3.py`: Tool usage for system questions
+
+## Benchmark Results
+
+**Current score: 8/10 passed**
+
+### Passing Questions:
+1. ✓ Wiki: protect a branch
+2. ✓ Wiki: SSH connection  
+3. ✓ Web framework from source
+4. ✓ API router modules
+5. ✓ Item count in database
+6. ✓ Status code without auth
+7. ✓ /analytics/completion-rate error
+8. ✓ /analytics/top-learners bug
+
+### Known Issues:
+- Question 9 (request lifecycle): LLM sometimes doesn't complete the answer after reading files
+- Question 10 (ETL idempotency): Not yet tested
+
+## Lessons Learned
+
+Building this agent revealed several important insights:
+
+1. **LLM Limitations**: The qwen3-coder-plus model sometimes struggles with long-form generation after multiple tool calls. It tends to continue the "reading loop" instead of switching to "answering mode". This was addressed by adding explicit instructions in the system prompt to stop after reading 4-5 files.
+
+2. **Tool Design**: Adding an `include_auth` parameter to `query_api` was crucial for testing unauthenticated access (question 6 about 401 status codes).
+
+3. **System Prompt Engineering**: The system prompt evolved significantly through iteration. Key additions included:
+   - Explicit tool selection guidance
+   - Warnings against saying "let me read X"
+   - Instructions to read ALL files before answering
+   - File count limits to prevent infinite reading
+
+4. **Encoding Issues**: Windows console encoding (cp1252) caused crashes when LLM responses contained emoji. This was fixed by wrapping stdout/stderr with UTF-8 TextIOWrapper.
+
+5. **Token Limits**: Increasing `max_tokens` to 16384 was necessary for long answers involving multiple file reads.
+
+6. **Iteration Count**: Setting `max_iterations` to 20 allows the agent to read multiple files (5-6) before providing an answer.
 
 ## Project Structure
 
@@ -218,19 +270,23 @@ Tests verify:
 se-toolkit-lab-6/
 ├── agent.py              # Main CLI entry point
 ├── .env.agent.secret     # LLM configuration (gitignored)
-├── .env.agent.example    # Example configuration
+├── .env.docker.secret    # Backend API configuration (gitignored)
+├── .env.agent.example    # Example LLM configuration
 ├── plans/
 │   ├── task-1.md         # Task 1 implementation plan
-│   └── task-2.md         # Task 2 implementation plan
+│   ├── task-2.md         # Task 2 implementation plan
+│   └── task-3.md         # Task 3 implementation plan
 ├── AGENT.md              # This documentation
 └── tests/
     ├── test_agent_task1.py  # Task 1 regression test
-    └── test_agent_task2.py  # Task 2 regression tests
+    ├── test_agent_task2.py  # Task 2 regression tests
+    └── test_agent_task3.py  # Task 3 regression tests
 ```
 
 ## Future Extensions
 
-### Task 3: Domain Knowledge
-- Expand system prompt with domain-specific knowledge
-- Add more tools (e.g., `query_api` for backend queries)
-- Implement better source extraction and citation
+### Potential Improvements
+- Add few-shot examples to system prompt showing complete answers
+- Implement a separate "answer synthesis" step after reading files
+- Consider using a different model with better long-form generation
+- Add more tools (e.g., `search_code` for grep-like functionality)
